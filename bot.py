@@ -5,6 +5,7 @@ Run:  python bot.py
 
 import io
 import os
+from typing import Optional
 import discord
 from discord import app_commands
 from dotenv import load_dotenv
@@ -219,28 +220,57 @@ async def cmd_bracket(interaction: discord.Interaction):
 #  § COMMANDE : /score  (Arbitre)
 # ════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="score", description="§ Rentrer le résultat d'un match (ID du match + @gagnant).")
-@app_commands.describe(match_id="ID du match (visible sur le bracket, ex: 3)", gagnant="@mention du joueur vainqueur")
+@bot.tree.command(name="score", description="§ Rentrer le résultat d'un match.")
+@app_commands.describe(
+    match_id="ID du match (visible sur le bracket, ex: 3)",
+    gagnant="@mention du joueur vainqueur (joueurs réels)",
+    slot="Slot du gagnant : 1 ou 2 (alternative au @mention, fonctionne aussi pour les tests)"
+)
 @arbitre_required
-async def cmd_score(interaction: discord.Interaction, match_id: int, gagnant: discord.Member):
-    winner_id = str(gagnant.id)
-    result = t_mod.report_score(match_id, winner_id)
+async def cmd_score(interaction: discord.Interaction, match_id: int,
+                    gagnant: Optional[discord.Member] = None, slot: Optional[int] = None):
+    # Resolve winner_id from either @mention or slot number
+    if gagnant is None and slot is None:
+        await interaction.response.send_message(
+            embed=embed_err("Précise le gagnant : **@mention** ou **slot** (1 ou 2)."), ephemeral=True)
+        return
 
-    if result == "error:not_ongoing":
+    t = t_mod.get()
+    if t.state != "ongoing":
         await interaction.response.send_message(
             embed=embed_err("Aucun tournoi en cours."), ephemeral=True)
         return
-    if result == "error:invalid_match":
+    if match_id not in t.matches:
         await interaction.response.send_message(
             embed=embed_err(f"Match **M{match_id}** introuvable."), ephemeral=True)
         return
+
+    m = t.matches[match_id]
+
+    if gagnant is not None:
+        winner_id = str(gagnant.id)
+        winner_name = gagnant.display_name
+    else:
+        if slot not in (1, 2):
+            await interaction.response.send_message(
+                embed=embed_err("Le slot doit être **1** ou **2**."), ephemeral=True)
+            return
+        winner_id = m.player1 if slot == 1 else m.player2
+        if winner_id is None:
+            await interaction.response.send_message(
+                embed=embed_err(f"Le slot {slot} du match **M{match_id}** est vide (BYE)."), ephemeral=True)
+            return
+        winner_name = t.player_names.get(winner_id, winner_id)
+
+    result = t_mod.report_score(match_id, winner_id)
+
     if result == "error:already_played":
         await interaction.response.send_message(
             embed=embed_err(f"Le match **M{match_id}** a déjà été joué."), ephemeral=True)
         return
     if result == "error:invalid_winner":
         await interaction.response.send_message(
-            embed=embed_err(f"{gagnant.display_name} ne participe pas au match **M{match_id}**."), ephemeral=True)
+            embed=embed_err(f"**{winner_name}** ne participe pas au match **M{match_id}**."), ephemeral=True)
         return
 
     t = t_mod.get()
@@ -250,7 +280,7 @@ async def cmd_score(interaction: discord.Interaction, match_id: int, gagnant: di
 
     embed = embed_ok(
         f"✅ Résultat enregistré – M{match_id}",
-        f"🏆 **Vainqueur :** {gagnant.display_name}\n"
+        f"🏆 **Vainqueur :** {winner_name}\n"
         f"❌ **Éliminé(e) :** {loser_name}"
         + ("\n\n🎉 **Tournoi terminé !** Tapez `/leaderboard` pour voir le classement." if result == "finished" else "")
     )
