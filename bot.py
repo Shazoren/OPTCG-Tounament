@@ -343,14 +343,22 @@ async def cmd_leaderboard(interaction: discord.Interaction):
             embed=embed_err("Aucun tournoi en cours ou terminé."), ephemeral=True)
         return
 
+    # Compute win counts from played matches
+    win_counts: dict[str, int] = {}
+    for m in t.matches.values():
+        if m.winner and not m.winner.startswith("BYE"):
+            win_counts[m.winner] = win_counts.get(m.winner, 0) + 1
+
     medals = ["🥇", "🥈", "🥉"]
     lines = []
 
-    if t.leaderboard:
-        for i, uid in enumerate(t.leaderboard):
+    top10 = t.leaderboard[:10]
+    if top10:
+        for i, uid in enumerate(top10):
             name = t.player_names.get(uid, f"<@{uid}>")
             prefix = medals[i] if i < 3 else f"`#{i+1}`"
-            lines.append(f"{prefix} **{name}**")
+            wins = win_counts.get(uid, 0)
+            lines.append(f"{prefix} **{name}** — {wins} victoire{'s' if wins > 1 else ''}")
 
     # Players still alive (not yet eliminated)
     still_in = [uid for uid in t.participants if uid not in t.leaderboard]
@@ -359,7 +367,8 @@ async def cmd_leaderboard(interaction: discord.Interaction):
         lines.append("*Encore en lice :*")
         for uid in still_in:
             name = t.player_names.get(uid, f"<@{uid}>")
-            lines.append(f"⚔️ {name}")
+            wins = win_counts.get(uid, 0)
+            lines.append(f"⚔️ **{name}** — {wins} victoire{'s' if wins > 1 else ''}")
 
     title = "🏆 Classement final" if t.state == "finished" else "📊 Classement en cours"
     embed = embed_ok(title, "\n".join(lines) if lines else "Aucun joueur éliminé pour l'instant.", color=OP_GOLD)
