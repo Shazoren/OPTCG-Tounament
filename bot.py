@@ -379,13 +379,18 @@ async def cmd_leaderboard(interaction: discord.Interaction, type: str = "tournoi
 
     win_counts: dict[str, int] = {}
     for m in t.matches.values():
-        if m.winner:
+        if m.winner and m.winner != "__BYE__":
             win_counts[m.winner] = win_counts.get(m.winner, 0) + 1
 
     lines = []
-    top10 = t.leaderboard[:10]
-    if top10:
-        for i, uid in enumerate(top10):
+    # Sort eliminated players by win count (desc), then by elimination order as tiebreaker
+    eliminated = t.leaderboard[:10]
+    eliminated_sorted = sorted(
+        eliminated,
+        key=lambda uid: (-win_counts.get(uid, 0), eliminated.index(uid))
+    )
+    if eliminated_sorted:
+        for i, uid in enumerate(eliminated_sorted):
             name = t.player_names.get(uid, f"<@{uid}>")
             prefix = medals[i] if i < 3 else f"`#{i+1}`"
             w = win_counts.get(uid, 0)
