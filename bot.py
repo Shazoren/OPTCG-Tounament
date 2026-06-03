@@ -337,6 +337,44 @@ async def cmd_leaderboard(interaction: discord.Interaction):
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  § COMMANDE : /test_remplir  (Arbitre) — TEST UNIQUEMENT
+# ════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="test_remplir", description="§ [TEST] Inscrit des faux joueurs pour tester le tournoi.")
+@app_commands.describe(nombre="Nombre de faux joueurs à inscrire (2–16)")
+@arbitre_required
+async def cmd_test_fill(interaction: discord.Interaction, nombre: int = 4):
+    if not (2 <= nombre <= 16):
+        await interaction.response.send_message(
+            embed=embed_err("Entre 2 et 16 joueurs."), ephemeral=True)
+        return
+    t = t_mod.get()
+    if t.state != "registration":
+        await interaction.response.send_message(
+            embed=embed_err("Ouvre d'abord les inscriptions avec `/ouvrir_inscriptions`."), ephemeral=True)
+        return
+
+    noms = ["Luffy", "Zoro", "Nami", "Usopp", "Sanji",
+            "Chopper", "Robin", "Franky", "Brook", "Jinbe",
+            "Shanks", "Mihawk", "Hancock", "Ace", "Sabo", "Crocodile"]
+
+    ajoutés = []
+    for i in range(nombre):
+        fake_id = f"TEST_{i+1:03d}"
+        result = t_mod.register_player(fake_id, noms[i % len(noms)])
+        if result == "ok":
+            ajoutés.append(noms[i % len(noms)])
+
+    embed = embed_ok(
+        "🧪 Faux joueurs inscrits",
+        f"**{len(ajoutés)} joueurs** ajoutés : {', '.join(ajoutés)}\n\n"
+        "Lance le tournoi avec `/lancer_tournoi`, puis utilise `/score` pour simuler les matchs.",
+        color=discord.Color.purple()
+    )
+    await interaction.response.send_message(embed=embed)
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  § COMMANDE : /annuler_tournoi  (Arbitre)
 # ════════════════════════════════════════════════════════════════════════════
 
