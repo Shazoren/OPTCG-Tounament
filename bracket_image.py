@@ -50,8 +50,10 @@ except OSError:
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
 def _player_label(pid: Optional[str], names: dict, winner: Optional[str]) -> tuple[str, tuple]:
-    if pid is None or pid == "__BYE__":
-        return "BYE", PENDING_COLOR
+    if pid is None:
+        return "...", (60, 65, 90)       # slot vide, en attente
+    if pid == "__BYE__":
+        return "BYE", PENDING_COLOR      # bye réel (pas de joueur)
     name = names.get(pid, f"#{pid[-4:]}")
     color = WIN_COLOR if pid == winner else (TEXT_COLOR if winner is None else (130, 130, 150))
     return name[:22], color
