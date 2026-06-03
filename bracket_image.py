@@ -29,11 +29,12 @@ SLOT_H          = 28
 MATCH_PAD       = 6
 MATCH_W         = SLOT_W + MATCH_PAD * 2
 MATCH_H         = SLOT_H * 2 + MATCH_PAD * 3  # two slots + padding
-V_GAP           = 20       # vertical gap between matches in the same round
-H_GAP           = 60       # horizontal gap between rounds
-SECTION_GAP     = 40       # gap between W / L / GF sections
+V_GAP           = 30       # vertical gap between matches in the same round
+H_GAP           = 70       # horizontal gap between rounds
+SECTION_GAP     = 50       # gap between W / L / GF sections
 HEADER_H        = 30
-MARGIN          = 20
+MARGIN          = 24
+PLAYIN_COLOR    = (100, 60, 180)   # purple – play-in
 
 FONT_SIZE       = 13
 FONT_SMALL      = 11
@@ -190,39 +191,55 @@ def _draw_section(draw: ImageDraw.Draw, ox: int, oy: int,
 def generate_bracket_image(t: Tournament) -> bytes:
     """Returns PNG bytes for the current bracket state."""
     # Exclude ghost matches (BYE vs BYE auto-resolved, no real players)
-    all_matches = [m for m in t.matches.values()
-                   if not (m.winner == "__BYE__")]
+    all_matches = [m for m in t.matches.values() if m.winner != "__BYE__"]
 
-    w_matches  = [m for m in all_matches if m.bracket == "winners"]
+    w_all      = [m for m in all_matches if m.bracket == "winners"]
+    w_playin   = [m for m in w_all if m.round_num == 0]   # play-in matches
+    w_main     = [m for m in w_all if m.round_num > 0]    # regular winners
     l_matches  = [m for m in all_matches if m.bracket == "losers"]
     gf_matches = [m for m in all_matches if m.bracket == "grand_finals"]
 
-    w_rounds  = _group_by_round(w_matches)
+    pi_rounds = _group_by_round(w_playin)
+    w_rounds  = _group_by_round(w_main)
     l_rounds  = _group_by_round(l_matches)
     gf_rounds = _group_by_round(gf_matches)
 
+    pi_w, pi_h = _calc_section_size(pi_rounds)
     w_w,  w_h  = _calc_section_size(w_rounds)
     l_w,  l_h  = _calc_section_size(l_rounds)
     gf_w, gf_h = _calc_section_size(gf_rounds)
 
-    total_w = w_w + (SECTION_GAP + l_w if l_w else 0) + (SECTION_GAP + gf_w if gf_w else 0) + MARGIN * 2
-    total_h = max(w_h, l_h, gf_h) + MARGIN * 2 + HEADER_H
+    sections_w = (
+        (pi_w + SECTION_GAP if pi_w else 0)
+        + w_w
+        + (SECTION_GAP + l_w if l_w else 0)
+        + (SECTION_GAP + gf_w if gf_w else 0)
+    )
+    total_w = sections_w + MARGIN * 2
+    total_h = max(pi_h, w_h, l_h, gf_h) + MARGIN * 2 + 30  # 30 for title
 
     img  = Image.new("RGB", (max(total_w, 400), max(total_h, 200)), BG_COLOR)
     draw = ImageDraw.Draw(img)
 
-    # Title
-    draw.text((MARGIN, MARGIN), "ONE PIECE TCG – Tournament Bracket",
+    draw.text((MARGIN, MARGIN), "ONE PIECE TCG - Tournament Bracket",
               font=_font_hdr, fill=(220, 80, 80))
 
     cx = MARGIN
-    cy = MARGIN + 24
+    cy = MARGIN + 30
 
-    cx = _draw_section(draw, cx, cy, w_rounds,  t.player_names, "WINNERS BRACKET", W_HEADER) + SECTION_GAP
+    if pi_w:
+        cx = _draw_section(draw, cx, cy, pi_rounds, t.player_names,
+                           "PLAY-IN", PLAYIN_COLOR) + SECTION_GAP
+
+    cx = _draw_section(draw, cx, cy, w_rounds, t.player_names,
+                       "WINNERS BRACKET", W_HEADER) + SECTION_GAP
+
     if l_w:
-        cx = _draw_section(draw, cx, cy, l_rounds, t.player_names, "LOSERS BRACKET",  L_HEADER) + SECTION_GAP
+        cx = _draw_section(draw, cx, cy, l_rounds, t.player_names,
+                           "LOSERS BRACKET", L_HEADER) + SECTION_GAP
     if gf_w:
-        _draw_section(draw, cx, cy, gf_rounds, t.player_names, "GRAND FINALS", GF_HEADER)
+        _draw_section(draw, cx, cy, gf_rounds, t.player_names,
+                      "GRAND FINALS", GF_HEADER)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
