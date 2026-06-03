@@ -405,7 +405,7 @@ async def cmd_leaderboard(interaction: discord.Interaction, type: str = "tournoi
             w = win_counts.get(uid, 0)
             lines.append(f"⚔️ **{name}** — {w} victoire{'s' if w > 1 else ''}")
 
-    title = "🏆 Classement final" if t.state == "finished" else "📊 Classement – matchs en cours"
+    title = "🏆 Leaderbord Match" if t.state == "finished" else "📊 Classement – matchs en cours"
     embed = embed_ok(title, "\n".join(lines) if lines else "Aucun joueur éliminé pour l'instant.", color=OP_GOLD)
     embed.set_footer(text="Victoires de matchs pour ce tournoi uniquement")
     await interaction.response.send_message(embed=embed)
