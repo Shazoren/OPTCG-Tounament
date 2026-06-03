@@ -337,6 +337,46 @@ async def cmd_leaderboard(interaction: discord.Interaction):
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  § COMMANDE : /annuler_tournoi  (Arbitre)
+# ════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="annuler_tournoi", description="§ Annule le tournoi en cours (inscription ou en jeu).")
+@arbitre_required
+async def cmd_cancel(interaction: discord.Interaction):
+    t = t_mod.get()
+    if t.state == "idle":
+        await interaction.response.send_message(
+            embed=embed_err("Aucun tournoi actif à annuler."), ephemeral=True)
+        return
+
+    previous_state = t.state
+    participant_count = len(t.participants)
+
+    # Wipe everything and return to idle
+    t_mod.open_registration()
+    data = t_mod._load()
+    data.state = "idle"
+    t_mod._save(data)
+
+    state_label = {
+        "registration": "en phase d'inscription",
+        "ongoing": "en cours",
+        "finished": "terminé",
+    }.get(previous_state, previous_state)
+
+    embed = discord.Embed(
+        title="🚫 Tournoi annulé",
+        description=(
+            f"Le tournoi ({state_label}) avec **{participant_count} participant(s)** a été annulé.\n"
+            "Toutes les données ont été effacées.\n\n"
+            "Utilisez `/ouvrir_inscriptions` pour en démarrer un nouveau."
+        ),
+        color=discord.Color.dark_orange()
+    )
+    await interaction.response.send_message(embed=embed)
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  § COMMANDE : /reset_tournoi  (Arbitre)
 # ════════════════════════════════════════════════════════════════════════════
 
