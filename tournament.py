@@ -9,7 +9,8 @@ import random
 from dataclasses import dataclass, field, asdict
 from typing import Optional
 
-DATA_FILE = "data/tournament.json"
+DATA_FILE        = "data/tournament.json"
+GLOBAL_LB_FILE   = "data/global_leaderboard.json"
 
 
 @dataclass
@@ -309,6 +310,7 @@ def _resolve_match(t: Tournament, match_id: int, winner_id: str):
         if loser_id and loser_id not in t.leaderboard:
             t.leaderboard.insert(1, loser_id)
         t.state = "finished"
+        _record_tournament_win(winner_id, t.player_names.get(winner_id, winner_id))
 
 
 def report_score(match_id: int, winner_id: str) -> str:
@@ -342,3 +344,39 @@ def get_match_by_players(user1: str, user2: str) -> Optional[Match]:
         if m.winner is None and {m.player1, m.player2} == {user1, user2}:
             return m
     return None
+
+
+# ─── global leaderboard (inter-tournois) ─────────────────────────────────────
+
+def _load_global_lb() -> dict:
+    """Returns {user_id: {"name": str, "wins": int}}"""
+    os.makedirs("data", exist_ok=True)
+    if os.path.exists(GLOBAL_LB_FILE):
+        with open(GLOBAL_LB_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+
+def _save_global_lb(lb: dict):
+    os.makedirs("data", exist_ok=True)
+    with open(GLOBAL_LB_FILE, "w", encoding="utf-8") as f:
+        json.dump(lb, f, ensure_ascii=False, indent=2)
+
+
+def _record_tournament_win(user_id: str, display_name: str):
+    """Called when a tournament finishes — increments the winner's count."""
+    lb = _load_global_lb()
+    if user_id not in lb:
+        lb[user_id] = {"name": display_name, "wins": 0}
+    lb[user_id]["wins"] += 1
+    lb[user_id]["name"] = display_name   # update name in case it changed
+    _save_global_lb(lb)
+
+
+def get_global_leaderboard() -> list[dict]:
+    """Returns a sorted list of {"user_id", "name", "wins"} descending by wins."""
+    lb = _load_global_lb()
+    entries = [{"user_id": uid, "name": v["name"], "wins": v["wins"]}
+               for uid, v in lb.items()]
+    entries.sort(key=lambda e: e["wins"], reverse=True)
+    return entries

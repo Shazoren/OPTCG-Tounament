@@ -335,43 +335,66 @@ async def cmd_pending(interaction: discord.Interaction):
 #  COMMANDE : /leaderboard  (tous)
 # ════════════════════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="leaderboard", description="Classement des joueurs du tournoi.")
-async def cmd_leaderboard(interaction: discord.Interaction):
+@bot.tree.command(name="leaderboard", description="Classement des joueurs.")
+@app_commands.describe(type="'tournois' = victoires inter-tournois (défaut) | 'matchs' = matchs du tournoi en cours")
+@app_commands.choices(type=[
+    app_commands.Choice(name="tournois", value="tournois"),
+    app_commands.Choice(name="matchs",   value="matchs"),
+])
+async def cmd_leaderboard(interaction: discord.Interaction, type: str = "tournois"):
+    medals = ["🥇", "🥈", "🥉"]
+
+    # ── Leaderboard tournois (inter-tournois, persistant) ──────────────────
+    if type == "tournois":
+        entries = t_mod.get_global_leaderboard()
+        if not entries:
+            await interaction.response.send_message(
+                embed=embed_ok("🏆 Leaderboard Tournois",
+                               "Aucun tournoi terminé pour l'instant.", color=OP_GOLD))
+            return
+        lines = []
+        for i, e in enumerate(entries[:10]):
+            prefix = medals[i] if i < 3 else f"`#{i+1}`"
+            w = e["wins"]
+            lines.append(f"{prefix} **{e['name']}** — {w} tournoi{'s' if w > 1 else ''} gagné{'s' if w > 1 else ''}")
+        embed = embed_ok("🏆 Leaderboard Tournois", "\n".join(lines), color=OP_GOLD)
+        embed.set_footer(text="Victoires cumulées sur tous les tournois")
+        await interaction.response.send_message(embed=embed)
+        return
+
+    # ── Leaderboard matchs (tournoi en cours) ─────────────────────────────
     t = t_mod.get()
     if t.state == "idle":
         await interaction.response.send_message(
             embed=embed_err("Aucun tournoi en cours ou terminé."), ephemeral=True)
         return
 
-    # Compute win counts from played matches
     win_counts: dict[str, int] = {}
     for m in t.matches.values():
-        if m.winner and not m.winner.startswith("BYE"):
+        if m.winner:
             win_counts[m.winner] = win_counts.get(m.winner, 0) + 1
 
-    medals = ["🥇", "🥈", "🥉"]
     lines = []
-
     top10 = t.leaderboard[:10]
     if top10:
         for i, uid in enumerate(top10):
             name = t.player_names.get(uid, f"<@{uid}>")
             prefix = medals[i] if i < 3 else f"`#{i+1}`"
-            wins = win_counts.get(uid, 0)
-            lines.append(f"{prefix} **{name}** — {wins} victoire{'s' if wins > 1 else ''}")
+            w = win_counts.get(uid, 0)
+            lines.append(f"{prefix} **{name}** — {w} victoire{'s' if w > 1 else ''}")
 
-    # Players still alive (not yet eliminated)
     still_in = [uid for uid in t.participants if uid not in t.leaderboard]
     if still_in:
         lines.append("")
         lines.append("*Encore en lice :*")
         for uid in still_in:
             name = t.player_names.get(uid, f"<@{uid}>")
-            wins = win_counts.get(uid, 0)
-            lines.append(f"⚔️ **{name}** — {wins} victoire{'s' if wins > 1 else ''}")
+            w = win_counts.get(uid, 0)
+            lines.append(f"⚔️ **{name}** — {w} victoire{'s' if w > 1 else ''}")
 
-    title = "🏆 Classement final" if t.state == "finished" else "📊 Classement en cours"
+    title = "🏆 Classement final" if t.state == "finished" else "📊 Classement – matchs en cours"
     embed = embed_ok(title, "\n".join(lines) if lines else "Aucun joueur éliminé pour l'instant.", color=OP_GOLD)
+    embed.set_footer(text="Victoires de matchs pour ce tournoi uniquement")
     await interaction.response.send_message(embed=embed)
 
 
