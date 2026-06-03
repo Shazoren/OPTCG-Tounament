@@ -132,6 +132,33 @@ async def cmd_unregister(interaction: discord.Interaction):
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  § COMMANDE : /exclure  (Arbitre)
+# ════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="exclure", description="§ Désinscrire de force un joueur des inscriptions.")
+@app_commands.describe(joueur="@mention du joueur à désinscrire")
+@arbitre_required
+async def cmd_force_unregister(interaction: discord.Interaction, joueur: discord.Member):
+    uid = str(joueur.id)
+    result = t_mod.unregister_player(uid)
+    if result == "error:not_open":
+        await interaction.response.send_message(
+            embed=embed_err("Les inscriptions ne sont pas ouvertes."), ephemeral=True)
+        return
+    if result == "error:not_registered":
+        await interaction.response.send_message(
+            embed=embed_err(f"**{joueur.display_name}** n'est pas inscrit(e)."), ephemeral=True)
+        return
+    t = t_mod.get()
+    await interaction.response.send_message(
+        embed=embed_ok(
+            "🚫 Joueur exclu",
+            f"**{joueur.display_name}** a été désinscrit(e) par un arbitre.\n"
+            f"Participants restants : **{len(t.participants)}**"
+        ))
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  COMMANDE : /participants  (tous)
 # ════════════════════════════════════════════════════════════════════════════
 
