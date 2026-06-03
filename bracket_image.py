@@ -25,7 +25,7 @@ HEADER_TEXT     = (240, 240, 255)
 LINE_COLOR      = (80, 90, 120)
 
 # Scale factor for high-DPI rendering (2 = retina / mobile-sharp)
-SCALE           = 2
+SCALE           = 3
 
 SLOT_W          = 200  * SCALE
 SLOT_H          = 28   * SCALE
