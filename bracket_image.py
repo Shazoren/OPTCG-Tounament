@@ -24,28 +24,40 @@ TEXT_COLOR      = (220, 225, 240)
 HEADER_TEXT     = (240, 240, 255)
 LINE_COLOR      = (80, 90, 120)
 
-SLOT_W          = 200
-SLOT_H          = 28
-MATCH_PAD       = 6
+# Scale factor for high-DPI rendering (2 = retina / mobile-sharp)
+SCALE           = 2
+
+SLOT_W          = 200  * SCALE
+SLOT_H          = 28   * SCALE
+MATCH_PAD       = 6    * SCALE
 MATCH_W         = SLOT_W + MATCH_PAD * 2
 MATCH_H         = SLOT_H * 2 + MATCH_PAD * 3  # two slots + padding
-V_GAP           = 30       # vertical gap between matches in the same round
-H_GAP           = 70       # horizontal gap between rounds
-SECTION_GAP     = 50       # gap between W / L / GF sections
-HEADER_H        = 30
-MARGIN          = 24
+V_GAP           = 30   * SCALE
+H_GAP           = 70   * SCALE
+SECTION_GAP     = 50   * SCALE
+HEADER_H        = 30   * SCALE
+MARGIN          = 24   * SCALE
 PLAYIN_COLOR    = (100, 60, 180)   # purple – play-in
 
-FONT_SIZE       = 13
-FONT_SMALL      = 11
+FONT_SIZE       = 13 * SCALE
+FONT_SMALL      = 11 * SCALE
 
-try:
-    _font      = ImageFont.truetype("arial.ttf", FONT_SIZE)
-    _font_bold = ImageFont.truetype("arialbd.ttf", FONT_SIZE)
-    _font_sm   = ImageFont.truetype("arial.ttf", FONT_SMALL)
-    _font_hdr  = ImageFont.truetype("arialbd.ttf", 14)
-except OSError:
-    _font = _font_bold = _font_sm = _font_hdr = ImageFont.load_default()
+def _load_font(name: str, size: int):
+    for path in [name, f"C:/Windows/Fonts/{name}", f"/usr/share/fonts/truetype/msttcorefonts/{name}"]:
+        try:
+            return ImageFont.truetype(path, size)
+        except OSError:
+            continue
+    # Fallback: Pillow's built-in default (will be small but always works)
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+_font      = _load_font("arial.ttf",   FONT_SIZE)
+_font_bold = _load_font("arialbd.ttf", FONT_SIZE)
+_font_sm   = _load_font("arial.ttf",   FONT_SMALL)
+_font_hdr  = _load_font("arialbd.ttf", 14 * SCALE)
 
 
 # ─── helpers ─────────────────────────────────────────────────────────────────
