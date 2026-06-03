@@ -171,6 +171,14 @@ async def cmd_start(interaction: discord.Interaction):
         await interaction.followup.send(
             embed=embed_err("Il faut au minimum **2 participants** pour lancer le tournoi."), ephemeral=True)
         return
+    if result == "error:odd_players":
+        t_count = len(t_mod.get().participants)
+        await interaction.followup.send(
+            embed=embed_err(
+                f"Le nombre de participants doit être **pair**.\n"
+                f"Actuellement : **{t_count} joueurs**. Ajoute ou retire 1 joueur."
+            ), ephemeral=True)
+        return
 
     t = t_mod.get()
     pending = t_mod.get_pending_matches(t)

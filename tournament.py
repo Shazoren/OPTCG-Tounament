@@ -37,7 +37,7 @@ class Tournament:
     player_names: dict = field(default_factory=dict)   # user_id -> display_name
 
 
-# ─── persistence ────────────────────────────────────────────────────────────
+# --- persistence ------------------------------------------------------------
 
 def _load() -> Tournament:
     os.makedirs("data", exist_ok=True)
@@ -62,7 +62,7 @@ def get() -> Tournament:
     return _load()
 
 
-# ─── registration ────────────────────────────────────────────────────────────
+# --- registration ------------------------------------------------------------
 
 def open_registration() -> str:
     t = _load()
@@ -102,7 +102,7 @@ def unregister_player(user_id: str) -> str:
     return "ok"
 
 
-# ─── bracket building ────────────────────────────────────────────────────────
+# --- bracket building --------------------------------------------------------
 
 def _next_power_of_two(n: int) -> int:
     return 1 if n <= 1 else 2 ** math.ceil(math.log2(n))
@@ -114,6 +114,8 @@ def start_tournament() -> str:
         return "error:wrong_state"
     if len(t.participants) < 2:
         return "error:not_enough_players"
+    if len(t.participants) % 2 != 0:
+        return "error:odd_players"
 
     random.shuffle(t.participants)
     _build_double_elim(t)
@@ -122,22 +124,45 @@ def start_tournament() -> str:
     return "ok"
 
 
+def _seed_players(players: list) -> list:
+    """
+    Distribute BYEs so that no two BYEs ever face each other.
+    Strategy: real matches fill the first pairs, BYE matches (1 real + 1 BYE)
+    fill the remaining pairs at the end.
+    e.g. 6 players → size 8 → pairs: [P1vP2, P3vP4, P5vBYE, P6vBYE]
+    """
+    n = len(players)
+    size = _next_power_of_two(n)
+    byes = size - n
+    num_pairs = size // 2
+
+    seeded: list = []
+    p_idx = 0
+    real_pairs = num_pairs - byes   # pairs with two real players
+
+    for i in range(num_pairs):
+        seeded.append(players[p_idx]); p_idx += 1
+        if i < real_pairs:
+            seeded.append(players[p_idx]); p_idx += 1
+        else:
+            seeded.append(None)     # BYE always faces a real player
+
+    return seeded
+
+
 def _build_double_elim(t: Tournament):
     """
     Build a full double-elimination bracket.
     Players are seeded randomly into the winners bracket.
     BYEs are automatically advanced.
     """
-    players = list(t.participants)
-    size = _next_power_of_two(len(players))
-    # Pad with BYEs
-    while len(players) < size:
-        players.append(None)
+    players = _seed_players(list(t.participants))
+    size = len(players)
 
     t.matches = {}
     t.next_match_id = 1
 
-    # ── Winners bracket ──────────────────────────────────────────────────────
+    # -- Winners bracket ------------------------------------------------------
     # Round 1 matches
     w_rounds: list[list[int]] = []   # list of rounds, each round = list of match_ids
     r1_ids = []
@@ -171,7 +196,7 @@ def _build_double_elim(t: Tournament):
 
     winners_final_id = w_rounds[-1][0]
 
-    # ── Losers bracket ───────────────────────────────────────────────────────
+    # -- Losers bracket -------------------------------------------------------
     # Losers bracket has 2*(size-1)-1 matches total, structured in pairs of rounds.
     # Round L1: losers from W round 1 (size/2 players → size/4 matches)
     # Then alternating: "drop-in" from next winners round, then internal losers round
@@ -247,7 +272,7 @@ def _build_double_elim(t: Tournament):
         losers_final_id = mid
         l_round_num += 1
 
-    # ── Grand Finals ─────────────────────────────────────────────────────────
+    # -- Grand Finals ---------------------------------------------------------
     gf_id = t.next_match_id
     t.next_match_id += 1
     gf = Match(match_id=gf_id, player1=None, player2=None,
@@ -256,55 +281,85 @@ def _build_double_elim(t: Tournament):
     t.matches[winners_final_id].winner_goes_to = gf_id
     t.matches[losers_final_id].winner_goes_to = gf_id
 
-    # ── Auto-advance BYEs ────────────────────────────────────────────────────
+    # -- Auto-advance BYEs ----------------------------------------------------
+    _auto_advance(t)
+
+
+# --- sentinel for BYE slots --------------------------------------------------
+# None  = slot not yet filled (waiting for a previous match result)
+# __BYE__ = slot filled by a bye (no real player; should auto-advance opponent)
+
+BYE_SENTINEL = "__BYE__"
+
+
+def _fill_slot(match: Match, value: Optional[str]):
+    """Fill the first empty slot of a match with value (player_id or BYE_SENTINEL)."""
+    if match.player1 is None:
+        match.player1 = value
+    else:
+        match.player2 = value
+
+
+def _auto_advance(t: Tournament):
+    """Propagate BYEs and double-BYEs until no more automatic advances are possible."""
     changed = True
     while changed:
         changed = False
         for m in list(t.matches.values()):
             if m.winner is not None:
                 continue
-            # BYE match: one slot is None (BYE), advance the real player
-            if m.player1 is None and m.player2 is not None:
-                _resolve_match(t, m.match_id, winner_id=m.player2)
+            p1, p2 = m.player1, m.player2
+
+            # Real player vs BYE sentinel → real player wins
+            if p1 == BYE_SENTINEL and p2 is not None and p2 != BYE_SENTINEL:
+                _resolve_match(t, m.match_id, winner_id=p2)
                 changed = True
-            elif m.player2 is None and m.player1 is not None:
-                _resolve_match(t, m.match_id, winner_id=m.player1)
+            elif p2 == BYE_SENTINEL and p1 is not None and p1 != BYE_SENTINEL:
+                _resolve_match(t, m.match_id, winner_id=p1)
                 changed = True
-            # Both None means waiting – skip
+            # Real player vs empty slot (one side is None, other is a real player)
+            elif p1 is None and p2 is not None and p2 != BYE_SENTINEL:
+                _resolve_match(t, m.match_id, winner_id=p2)
+                changed = True
+            elif p2 is None and p1 is not None and p1 != BYE_SENTINEL:
+                _resolve_match(t, m.match_id, winner_id=p1)
+                changed = True
+            # Both BYE → propagate BYE forward, this match is a ghost
+            elif p1 == BYE_SENTINEL and p2 == BYE_SENTINEL:
+                m.winner = BYE_SENTINEL
+                m.loser  = BYE_SENTINEL
+                if m.winner_goes_to:
+                    _fill_slot(t.matches[m.winner_goes_to], BYE_SENTINEL)
+                if m.loser_goes_to:
+                    _fill_slot(t.matches[m.loser_goes_to], BYE_SENTINEL)
+                changed = True
 
 
-# ─── match resolution ────────────────────────────────────────────────────────
+# --- match resolution --------------------------------------------------------
 
 def _resolve_match(t: Tournament, match_id: int, winner_id: str):
     m = t.matches[match_id]
-    loser_id = m.player2 if winner_id == m.player1 else m.player1
-    m.winner = winner_id
-    m.loser = loser_id
+    # Determine loser (may be BYE_SENTINEL or None → both mean "no real loser")
+    raw_loser = m.player2 if winner_id == m.player1 else m.player1
+    loser_id  = raw_loser if (raw_loser and raw_loser != BYE_SENTINEL) else None
+    m.winner  = winner_id
+    m.loser   = raw_loser
 
     # Move winner forward
     if m.winner_goes_to:
-        nxt = t.matches[m.winner_goes_to]
-        if nxt.player1 is None:
-            nxt.player1 = winner_id
-        else:
-            nxt.player2 = winner_id
+        _fill_slot(t.matches[m.winner_goes_to], winner_id)
 
-    # Move loser forward (or eliminate)
-    if loser_id is not None:
-        if m.loser_goes_to:
-            nxt = t.matches[m.loser_goes_to]
-            if nxt.player1 is None:
-                nxt.player1 = loser_id
-            else:
-                nxt.player2 = loser_id
-        else:
-            # Eliminated – add to leaderboard (will be ordered later)
-            if loser_id not in t.leaderboard:
-                t.leaderboard.insert(0, loser_id)
+    # Move loser forward or eliminate
+    if m.loser_goes_to:
+        # Route BYE_SENTINEL or None as BYE_SENTINEL so the next match can auto-advance
+        _fill_slot(t.matches[m.loser_goes_to], loser_id if loser_id else BYE_SENTINEL)
+    elif loser_id is not None:
+        # No further match → eliminated
+        if loser_id not in t.leaderboard:
+            t.leaderboard.insert(0, loser_id)
 
-    # Check if grand finals just finished
-    if m.bracket == "grand_finals" and m.winner_goes_to is None:
-        # Tournament over
+    # Check if grand finals just finished (winner must be a real player)
+    if m.bracket == "grand_finals" and m.winner_goes_to is None and winner_id != BYE_SENTINEL:
         if winner_id not in t.leaderboard:
             t.leaderboard.insert(0, winner_id)
         if loser_id and loser_id not in t.leaderboard:
@@ -322,20 +377,22 @@ def report_score(match_id: int, winner_id: str) -> str:
     m = t.matches[match_id]
     if m.winner is not None:
         return "error:already_played"
-    if winner_id not in (m.player1, m.player2):
+    if winner_id not in (m.player1, m.player2) or winner_id == BYE_SENTINEL:
         return "error:invalid_winner"
     _resolve_match(t, match_id, winner_id)
     _save(t)
     return "finished" if t.state == "finished" else "ok"
 
 
-# ─── helpers ─────────────────────────────────────────────────────────────────
+# --- helpers -----------------------------------------------------------------
 
 def get_pending_matches(t: Optional[Tournament] = None) -> list[Match]:
     if t is None:
         t = _load()
     return [m for m in t.matches.values()
-            if m.winner is None and m.player1 is not None and m.player2 is not None]
+            if m.winner is None
+            and m.player1 is not None and m.player1 != BYE_SENTINEL
+            and m.player2 is not None and m.player2 != BYE_SENTINEL]
 
 
 def get_match_by_players(user1: str, user2: str) -> Optional[Match]:
@@ -346,7 +403,7 @@ def get_match_by_players(user1: str, user2: str) -> Optional[Match]:
     return None
 
 
-# ─── global leaderboard (inter-tournois) ─────────────────────────────────────
+# --- global leaderboard (inter-tournois) -------------------------------------
 
 def _load_global_lb() -> dict:
     """Returns {user_id: {"name": str, "wins": int}}"""

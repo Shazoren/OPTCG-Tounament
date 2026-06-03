@@ -50,7 +50,7 @@ except OSError:
 # ─── helpers ─────────────────────────────────────────────────────────────────
 
 def _player_label(pid: Optional[str], names: dict, winner: Optional[str]) -> tuple[str, tuple]:
-    if pid is None:
+    if pid is None or pid == "__BYE__":
         return "BYE", PENDING_COLOR
     name = names.get(pid, f"#{pid[-4:]}")
     color = WIN_COLOR if pid == winner else (TEXT_COLOR if winner is None else (130, 130, 150))
@@ -187,7 +187,9 @@ def _draw_section(draw: ImageDraw.Draw, ox: int, oy: int,
 
 def generate_bracket_image(t: Tournament) -> bytes:
     """Returns PNG bytes for the current bracket state."""
-    all_matches = list(t.matches.values())
+    # Exclude ghost matches (BYE vs BYE auto-resolved, no real players)
+    all_matches = [m for m in t.matches.values()
+                   if not (m.winner == "__BYE__")]
 
     w_matches  = [m for m in all_matches if m.bracket == "winners"]
     l_matches  = [m for m in all_matches if m.bracket == "losers"]
