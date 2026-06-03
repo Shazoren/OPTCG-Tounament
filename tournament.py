@@ -104,8 +104,11 @@ def unregister_player(user_id: str) -> str:
 
 # --- bracket building --------------------------------------------------------
 
-def _next_power_of_two(n: int) -> int:
-    return 1 if n <= 1 else 2 ** math.ceil(math.log2(n))
+def _prev_power_of_two(n: int) -> int:
+    p = 1
+    while p * 2 <= n:
+        p *= 2
+    return p
 
 
 def start_tournament() -> str:
@@ -124,56 +127,65 @@ def start_tournament() -> str:
     return "ok"
 
 
-def _seed_players(players: list) -> list:
-    """
-    Distribute BYEs so that no two BYEs ever face each other.
-    Strategy: real matches fill the first pairs, BYE matches (1 real + 1 BYE)
-    fill the remaining pairs at the end.
-    e.g. 6 players → size 8 → pairs: [P1vP2, P3vP4, P5vBYE, P6vBYE]
-    """
-    n = len(players)
-    size = _next_power_of_two(n)
-    byes = size - n
-    num_pairs = size // 2
-
-    seeded: list = []
-    p_idx = 0
-    real_pairs = num_pairs - byes   # pairs with two real players
-
-    for i in range(num_pairs):
-        seeded.append(players[p_idx]); p_idx += 1
-        if i < real_pairs:
-            seeded.append(players[p_idx]); p_idx += 1
-        else:
-            seeded.append(None)     # BYE always faces a real player
-
-    return seeded
-
-
 def _build_double_elim(t: Tournament):
     """
-    Build a full double-elimination bracket.
-    Players are seeded randomly into the winners bracket.
-    BYEs are automatically advanced.
+    Play-in format for non-power-of-2 player counts.
+
+    base  = largest power of 2 <= N  (size of the main bracket)
+    overflow = N - base               (number of play-in MATCHES; uses 2*overflow players)
+
+    Example N=10, base=8, overflow=2:
+      - Play-in: P7vP8 (A), P9vP10 (B)  → 2 winners fill last 2 R1 slots
+      - R1: P1-P6 direct + A_winner + B_winner  (8 players, 4 matches)
+      - Standard double-elim from R1 onwards
+
+    Play-in losers are eliminated (they failed to qualify for the main bracket).
     """
-    players = _seed_players(list(t.participants))
-    size = len(players)
+    players = list(t.participants)
+    n       = len(players)
+    base    = _prev_power_of_two(n)
+    overflow = n - base            # number of play-in matches
 
     t.matches = {}
     t.next_match_id = 1
 
-    # -- Winners bracket ------------------------------------------------------
-    # Round 1 matches
-    w_rounds: list[list[int]] = []   # list of rounds, each round = list of match_ids
+    # -- Play-in matches (winners bracket round 0) ----------------------------
+    play_in_ids  = []
+    direct_count = base - overflow   # players going straight to R1
+    direct       = players[:direct_count]
+    play_in_pl   = players[direct_count:]  # 2*overflow players
+
+    for i in range(overflow):
+        mid = t.next_match_id; t.next_match_id += 1
+        m = Match(match_id=mid,
+                  player1=play_in_pl[i * 2],
+                  player2=play_in_pl[i * 2 + 1],
+                  bracket="winners", round_num=0)
+        t.matches[mid] = m
+        play_in_ids.append(mid)
+
+    # -- R1 slots: direct players + None placeholders for play-in winners -----
+    r1_players = direct + [None] * overflow   # length == base
+
+    w_rounds: list[list[int]] = []
     r1_ids = []
-    for i in range(0, size, 2):
-        mid = t.next_match_id
-        t.next_match_id += 1
-        m = Match(match_id=mid, player1=players[i], player2=players[i + 1],
+    for i in range(0, base, 2):
+        mid = t.next_match_id; t.next_match_id += 1
+        m = Match(match_id=mid,
+                  player1=r1_players[i],
+                  player2=r1_players[i + 1],
                   bracket="winners", round_num=1)
         t.matches[mid] = m
         r1_ids.append(mid)
     w_rounds.append(r1_ids)
+
+    # Wire play-in winners into the last overflow slots of R1
+    for i, pi_id in enumerate(play_in_ids):
+        slot = direct_count + i          # position in r1_players
+        r1_match = r1_ids[slot // 2]    # which R1 match holds this slot
+        t.matches[pi_id].winner_goes_to = r1_match
+        # player1/player2 in that R1 match is already None; _fill_slot will fill it
+        # when the play-in match is resolved
 
     # Subsequent winners rounds
     prev_round = r1_ids
@@ -197,25 +209,21 @@ def _build_double_elim(t: Tournament):
     winners_final_id = w_rounds[-1][0]
 
     # -- Losers bracket -------------------------------------------------------
-    # Losers bracket has 2*(size-1)-1 matches total, structured in pairs of rounds.
-    # Round L1: losers from W round 1 (size/2 players → size/4 matches)
-    # Then alternating: "drop-in" from next winners round, then internal losers round
+    # Play-in losers (round 0) have no loser_goes_to → they are eliminated.
+    # The losers bracket starts from W R1 losers.
     l_rounds: list[list[int]] = []
     l_round_num = 1
 
-    # L-Round 1: losers from W round 1 fight each other
-    l1_losers_count = len(w_rounds[0])  # == size/2
+    # L R1: losers from W R1 fight each other (base/2 matches → base/4 L matches)
     l1_ids = []
-    for i in range(0, l1_losers_count, 2):
-        mid = t.next_match_id
-        t.next_match_id += 1
+    for i in range(0, len(r1_ids), 2):
+        mid = t.next_match_id; t.next_match_id += 1
         m = Match(match_id=mid, player1=None, player2=None,
                   bracket="losers", round_num=l_round_num)
         t.matches[mid] = m
         l1_ids.append(mid)
-        # W-round-1 losers go here
-        t.matches[w_rounds[0][i]].loser_goes_to = mid
-        t.matches[w_rounds[0][i + 1]].loser_goes_to = mid
+        t.matches[r1_ids[i]].loser_goes_to = mid
+        t.matches[r1_ids[i + 1]].loser_goes_to = mid
     l_rounds.append(l1_ids)
     l_round_num += 1
 
