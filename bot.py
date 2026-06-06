@@ -13,9 +13,14 @@ import tournament as t_mod
 from bracket_image import generate_bracket_image
 
 load_dotenv()
-TOKEN            = os.getenv("DISCORD_TOKEN", "")
-GUILD_ID         = int(os.getenv("GUILD_ID", "0"))
-ARBITRE_ROLE     = os.getenv("ARBITRE_ROLE_NAME", "Arbitre")
+TOKEN                = os.getenv("DISCORD_TOKEN", "")
+GUILD_ID             = int(os.getenv("GUILD_ID", "0"))
+ARBITRE_ROLE         = os.getenv("ARBITRE_ROLE_NAME", "Arbitre")
+PLAYER_CHANNEL_ID    = int(os.getenv("PLAYER_CHANNEL_ID", "0"))
+TOURNAMENT_CHANNEL_ID = int(os.getenv("TOURNAMENT_CHANNEL_ID", "0"))
+
+# Commandes autorisées pour les non-arbitres dans le channel joueurs
+PLAYER_CHANNEL_CMDS = {"inscription", "desinscrire", "participants"}
 
 # ─── bot setup ───────────────────────────────────────────────────────────────
 
@@ -65,11 +70,63 @@ def arbitre_required(func):
     return wrapper
 
 
+def channel_required(func):
+    """Decorator: enforce channel restrictions.
+    - Channel joueurs  → seulement inscription/desinscrire/participants (+ arbitres)
+    - Channel tournoi  → toutes les commandes
+    - Arbitres         → autorisés dans les 2 channels sans restriction
+    - Si non configuré → aucune restriction
+    """
+    import functools
+    @functools.wraps(func)
+    async def wrapper(interaction: discord.Interaction, *args, **kwargs):
+        # Pas de restriction si les channels ne sont pas configurés
+        if PLAYER_CHANNEL_ID == 0 and TOURNAMENT_CHANNEL_ID == 0:
+            return await func(interaction, *args, **kwargs)
+
+        # Les arbitres passent partout
+        if is_arbitre(interaction):
+            channel_id = interaction.channel_id
+            if channel_id in (PLAYER_CHANNEL_ID, TOURNAMENT_CHANNEL_ID):
+                return await func(interaction, *args, **kwargs)
+            await interaction.response.send_message(
+                embed=embed_err("Utilisez les channels dédiés au tournoi."), ephemeral=True)
+            return
+
+        channel_id = interaction.channel_id
+        cmd_name = interaction.command.name if interaction.command else ""
+
+        if channel_id == PLAYER_CHANNEL_ID:
+            if cmd_name in PLAYER_CHANNEL_CMDS:
+                return await func(interaction, *args, **kwargs)
+            await interaction.response.send_message(
+                embed=embed_err(
+                    f"Seules les commandes `/inscription`, `/desinscrire` et `/participants` "
+                    f"sont disponibles dans ce channel."
+                ), ephemeral=True)
+            return
+
+        if channel_id == TOURNAMENT_CHANNEL_ID:
+            if cmd_name in {"inscription", "desinscrire"}:
+                mention = f"<#{PLAYER_CHANNEL_ID}>" if PLAYER_CHANNEL_ID else "le channel dédié aux inscriptions"
+                await interaction.response.send_message(
+                    embed=embed_err(f"Les inscriptions se font dans {mention}."),
+                    ephemeral=True)
+                return
+            return await func(interaction, *args, **kwargs)
+
+        await interaction.response.send_message(
+            embed=embed_err("Les commandes du bot ne sont pas disponibles dans ce channel."),
+            ephemeral=True)
+    return wrapper
+
+
 # ════════════════════════════════════════════════════════════════════════════
 #  § COMMANDE : /ouvrir_inscriptions  (Arbitre)
 # ════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="ouvrir_inscriptions", description="§ Ouvre les inscriptions au tournoi.")
+@channel_required
 @arbitre_required
 async def cmd_open(interaction: discord.Interaction):
     result = t_mod.open_registration()
@@ -90,6 +147,7 @@ async def cmd_open(interaction: discord.Interaction):
 # ════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="inscription", description="S'inscrire au tournoi en cours.")
+@channel_required
 async def cmd_register(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     name = interaction.user.display_name
@@ -116,6 +174,7 @@ async def cmd_register(interaction: discord.Interaction):
 # ════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="desinscrire", description="Se désinscrire du tournoi avant son lancement.")
+@channel_required
 async def cmd_unregister(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     result = t_mod.unregister_player(uid)
@@ -137,6 +196,7 @@ async def cmd_unregister(interaction: discord.Interaction):
 
 @bot.tree.command(name="exclure", description="§ Désinscrire de force un joueur des inscriptions.")
 @app_commands.describe(joueur="@mention du joueur à désinscrire")
+@channel_required
 @arbitre_required
 async def cmd_force_unregister(interaction: discord.Interaction, joueur: discord.Member):
     uid = str(joueur.id)
@@ -163,6 +223,7 @@ async def cmd_force_unregister(interaction: discord.Interaction, joueur: discord
 # ════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="participants", description="Liste des participants inscrits.")
+@channel_required
 async def cmd_participants(interaction: discord.Interaction):
     t = t_mod.get()
     if t.state == "idle":
@@ -186,6 +247,7 @@ async def cmd_participants(interaction: discord.Interaction):
 # ════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="lancer_tournoi", description="§ Lance le tournoi et génère le bracket.")
+@channel_required
 @arbitre_required
 async def cmd_start(interaction: discord.Interaction):
     await interaction.response.defer()
@@ -236,6 +298,7 @@ async def cmd_start(interaction: discord.Interaction):
 # ════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="bracket", description="Affiche le bracket actuel sous forme d'image.")
+@channel_required
 async def cmd_bracket(interaction: discord.Interaction):
     await interaction.response.defer()
     t = t_mod.get()
@@ -261,6 +324,7 @@ async def cmd_bracket(interaction: discord.Interaction):
     gagnant="@mention du joueur vainqueur (joueurs réels)",
     slot="Slot du gagnant : 1 ou 2 (alternative au @mention, fonctionne aussi pour les tests)"
 )
+@channel_required
 @arbitre_required
 async def cmd_score(interaction: discord.Interaction, match_id: int,
                     gagnant: Optional[discord.Member] = None, slot: Optional[int] = None):
@@ -346,6 +410,7 @@ async def cmd_score(interaction: discord.Interaction, match_id: int,
 # ════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="matchs_en_attente", description="Liste des matchs non encore joués.")
+@channel_required
 async def cmd_pending(interaction: discord.Interaction):
     t = t_mod.get()
     if t.state != "ongoing":
@@ -371,6 +436,7 @@ async def cmd_pending(interaction: discord.Interaction):
 # ════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="leaderboard", description="Classement des joueurs.")
+@channel_required
 @app_commands.describe(type="'tournois' = victoires inter-tournois (défaut) | 'matchs' = matchs du tournoi en cours")
 @app_commands.choices(type=[
     app_commands.Choice(name="tournois", value="tournois"),
@@ -444,6 +510,7 @@ async def cmd_leaderboard(interaction: discord.Interaction, type: str = "tournoi
 
 @bot.tree.command(name="test_remplir", description="§ [TEST] Inscrit des faux joueurs pour tester le tournoi.")
 @app_commands.describe(nombre="Nombre de faux joueurs à inscrire (2–16)")
+@channel_required
 @arbitre_required
 async def cmd_test_fill(interaction: discord.Interaction, nombre: int = 4):
     if not (2 <= nombre <= 16):
@@ -481,6 +548,7 @@ async def cmd_test_fill(interaction: discord.Interaction, nombre: int = 4):
 # ════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="annuler_tournoi", description="§ Annule le tournoi en cours (inscription ou en jeu).")
+@channel_required
 @arbitre_required
 async def cmd_cancel(interaction: discord.Interaction):
     t = t_mod.get()
@@ -521,6 +589,7 @@ async def cmd_cancel(interaction: discord.Interaction):
 # ════════════════════════════════════════════════════════════════════════════
 
 @bot.tree.command(name="reset_tournoi", description="§ Réinitialise complètement le tournoi.")
+@channel_required
 @arbitre_required
 async def cmd_reset(interaction: discord.Interaction):
     t_mod.open_registration()   # resets everything and sets state to "registration"
