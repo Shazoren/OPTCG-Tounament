@@ -445,3 +445,8 @@ def get_global_leaderboard() -> list[dict]:
                for uid, v in lb.items()]
     entries.sort(key=lambda e: e["wins"], reverse=True)
     return entries
+
+
+def reset_global_leaderboard():
+    """Wipe the persistent inter-tournament leaderboard."""
+    _save_global_lb({})

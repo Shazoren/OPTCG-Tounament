@@ -525,6 +525,53 @@ async def cmd_leaderboard(interaction: discord.Interaction, type: str = "tournoi
 
 
 # ════════════════════════════════════════════════════════════════════════════
+#  COMMANDE : /help  (tous — ephemeral)
+# ════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="help", description="Liste des commandes disponibles.")
+@channel_required
+async def cmd_help(interaction: discord.Interaction):
+    embed = discord.Embed(
+        title="📖 Commandes One Piece TCG",
+        color=OP_RED
+    )
+
+    embed.add_field(
+        name="👤 Commandes joueurs",
+        value=(
+            "`/participants` — Voir la liste des joueurs inscrits\n"
+            "`/bracket` — Afficher le bracket du tournoi en image\n"
+            "`/matchs_en_attente` — Voir les matchs pas encore joués\n"
+            "`/leaderboard tournois` — Classement global des victoires de tournois\n"
+            "`/leaderboard matchs` — Classement des matchs du tournoi en cours\n"
+            "`/help` — Afficher ce message"
+        ),
+        inline=False
+    )
+
+    if is_arbitre(interaction):
+        embed.add_field(
+            name="⚔️ Commandes Arbitre (§)",
+            value=(
+                "`/ouvrir_inscriptions` — Ouvrir les inscriptions et poster le panel\n"
+                "`/exclure @joueur` — Désinscrire de force un joueur\n"
+                "`/lancer_tournoi` — Lancer le tournoi et générer le bracket\n"
+                "`/score <match_id> [@joueur | slot]` — Enregistrer le résultat d'un match\n"
+                "`/annuler_tournoi` — Annuler le tournoi en cours\n"
+                "`/reset_tournoi` — Réinitialiser complètement le tournoi\n"
+                "`/reset_leaderboard` — Remettre à zéro le leaderboard inter-tournois\n"
+                "`/test_remplir [nombre]` — Inscrire des faux joueurs pour tester"
+            ),
+            inline=False
+        )
+        embed.set_footer(text=f"Tu as le rôle {ARBITRE_ROLE} — accès complet.")
+    else:
+        embed.set_footer(text="Les inscriptions se font via le bouton dans le channel joueurs.")
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+# ════════════════════════════════════════════════════════════════════════════
 #  § COMMANDE : /test_remplir  (Arbitre) — TEST UNIQUEMENT
 # ════════════════════════════════════════════════════════════════════════════
 
@@ -619,6 +666,21 @@ async def cmd_reset(interaction: discord.Interaction):
     _t._save(data)
     await interaction.response.send_message(
         embed=embed_ok("🔄 Tournoi réinitialisé", "Toutes les données ont été effacées."))
+
+
+# ════════════════════════════════════════════════════════════════════════════
+#  § COMMANDE : /reset_leaderboard  (Arbitre)
+# ════════════════════════════════════════════════════════════════════════════
+
+@bot.tree.command(name="reset_leaderboard", description="§ Remet à zéro le leaderboard inter-tournois.")
+@channel_required
+@arbitre_required
+async def cmd_reset_leaderboard(interaction: discord.Interaction):
+    t_mod.reset_global_leaderboard()
+    await interaction.response.send_message(
+        embed=embed_ok("🗑️ Leaderboard réinitialisé", "Le classement inter-tournois a été remis à zéro."),
+        ephemeral=True
+    )
 
 
 # ─── events ──────────────────────────────────────────────────────────────────
