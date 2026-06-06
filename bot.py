@@ -20,7 +20,7 @@ PLAYER_CHANNEL_ID    = int(os.getenv("PLAYER_CHANNEL_ID", "0"))
 TOURNAMENT_CHANNEL_ID = int(os.getenv("TOURNAMENT_CHANNEL_ID", "0"))
 
 # Commandes autorisées pour les non-arbitres dans le channel joueurs
-PLAYER_CHANNEL_CMDS = {"inscription", "desinscrire", "participants"}
+PLAYER_CHANNEL_CMDS = {"participants"}
 
 # ─── bot setup ───────────────────────────────────────────────────────────────
 
@@ -32,6 +32,7 @@ class TournamentBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
+        self.add_view(InscriptionView())   # re-register persistent view after restart
         guild = discord.Object(id=GUILD_ID)
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
@@ -49,6 +50,70 @@ def embed_ok(title: str, desc: str = "", color=OP_RED) -> discord.Embed:
 
 def embed_err(msg: str) -> discord.Embed:
     return discord.Embed(title="❌ Erreur", description=msg, color=discord.Color.dark_red())
+
+# ─── registration panel ──────────────────────────────────────────────────────
+
+def _build_panel_embed() -> discord.Embed:
+    t = t_mod.get()
+    n = len(t.participants)
+    names = [t.player_names.get(uid, uid) for uid in t.participants]
+
+    if t.state == "registration":
+        desc = (
+            "Clique sur le bouton ci-dessous pour **t'inscrire** au tournoi.\n"
+            "Si tu es déjà inscrit(e), le bouton te **désinscrira**.\n\n"
+            "⚠️ N'ouvre pas de ticket sans raison valable sous peine de perdre l'accès au serveur."
+        )
+        color = discord.Color.from_rgb(212, 60, 60)
+        status = f"✅ Inscriptions ouvertes — **{n}** participant{'s' if n != 1 else ''}"
+    else:
+        desc = "Les inscriptions sont actuellement **fermées**."
+        color = discord.Color.dark_gray()
+        status = "🔒 Inscriptions fermées"
+
+    embed = discord.Embed(title="🏴‍☠️ One Piece TCG — Tournoi", description=desc, color=color)
+    embed.add_field(name=status, value="\n".join(f"• {name}" for name in names) if names else "*Aucun inscrit pour l'instant*", inline=False)
+    embed.set_footer(text="Powered by OPTCG Bot")
+    return embed
+
+
+class InscriptionView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)   # persistant après redémarrage
+
+    @discord.ui.button(
+        label="S'inscrire / Se désinscrire",
+        style=discord.ButtonStyle.danger,
+        custom_id="btn_inscription_panel",
+        emoji="⚔️"
+    )
+    async def toggle_inscription(self, interaction: discord.Interaction, button: discord.ui.Button):
+        uid = str(interaction.user.id)
+        name = interaction.user.display_name
+        t = t_mod.get()
+
+        if t.state != "registration":
+            await interaction.response.send_message(
+                embed=embed_err("Les inscriptions ne sont pas ouvertes."), ephemeral=True)
+            return
+
+        if uid in t.participants:
+            t_mod.unregister_player(uid)
+            t = t_mod.get()
+            msg = embed_ok("↩️ Désinscription", f"**{name}** s'est désinscrit(e).\nParticipants : **{len(t.participants)}**")
+        else:
+            result = t_mod.register_player(uid, name)
+            if result != "ok":
+                await interaction.response.send_message(
+                    embed=embed_err("Inscription impossible."), ephemeral=True)
+                return
+            t = t_mod.get()
+            msg = embed_ok("✅ Inscription confirmée", f"**{name}** rejoint le tournoi !\nParticipants : **{len(t.participants)}**")
+
+        # Mise à jour du panel + réponse éphémère au joueur
+        await interaction.response.edit_message(embed=_build_panel_embed(), view=self)
+        await interaction.followup.send(embed=msg, ephemeral=True)
+
 
 # ─── permission check ────────────────────────────────────────────────────────
 
@@ -107,12 +172,6 @@ def channel_required(func):
             return
 
         if channel_id == TOURNAMENT_CHANNEL_ID:
-            if cmd_name in {"inscription", "desinscrire"}:
-                mention = f"<#{PLAYER_CHANNEL_ID}>" if PLAYER_CHANNEL_ID else "le channel dédié aux inscriptions"
-                await interaction.response.send_message(
-                    embed=embed_err(f"Les inscriptions se font dans {mention}."),
-                    ephemeral=True)
-                return
             return await func(interaction, *args, **kwargs)
 
         await interaction.response.send_message(
@@ -134,60 +193,21 @@ async def cmd_open(interaction: discord.Interaction):
         await interaction.response.send_message(
             embed=embed_err("Un tournoi est déjà en cours d'inscription ou actif."), ephemeral=True)
         return
-    embed = embed_ok(
-        "🏴‍☠️ Inscriptions ouvertes !",
-        "Utilisez `/inscription` pour vous inscrire au tournoi One Piece TCG.\n"
-        "Un arbitre lancera le tournoi avec `/lancer_tournoi`."
-    )
-    await interaction.response.send_message(embed=embed)
 
-
-# ════════════════════════════════════════════════════════════════════════════
-#  COMMANDE : /inscription  (tous)
-# ════════════════════════════════════════════════════════════════════════════
-
-@bot.tree.command(name="inscription", description="S'inscrire au tournoi en cours.")
-@channel_required
-async def cmd_register(interaction: discord.Interaction):
-    uid = str(interaction.user.id)
-    name = interaction.user.display_name
-    result = t_mod.register_player(uid, name)
-    if result == "error:not_open":
-        await interaction.response.send_message(
-            embed=embed_err("Les inscriptions ne sont pas ouvertes."), ephemeral=True)
-        return
-    if result == "error:already_registered":
-        await interaction.response.send_message(
-            embed=embed_err("Tu es déjà inscrit(e) !"), ephemeral=True)
-        return
-    t = t_mod.get()
-    embed = embed_ok(
-        "✅ Inscription confirmée",
-        f"**{name}** rejoint le tournoi !\n"
-        f"Participants inscrits : **{len(t.participants)}**"
-    )
-    await interaction.response.send_message(embed=embed)
-
-
-# ════════════════════════════════════════════════════════════════════════════
-#  COMMANDE : /desinscrire  (tous)
-# ════════════════════════════════════════════════════════════════════════════
-
-@bot.tree.command(name="desinscrire", description="Se désinscrire du tournoi avant son lancement.")
-@channel_required
-async def cmd_unregister(interaction: discord.Interaction):
-    uid = str(interaction.user.id)
-    result = t_mod.unregister_player(uid)
-    if result == "error:not_open":
-        await interaction.response.send_message(
-            embed=embed_err("Les inscriptions ne sont pas ouvertes."), ephemeral=True)
-        return
-    if result == "error:not_registered":
-        await interaction.response.send_message(
-            embed=embed_err("Tu n'es pas inscrit(e)."), ephemeral=True)
-        return
+    # Poster le panel dans le channel joueurs (si configuré), sinon ici
     await interaction.response.send_message(
-        embed=embed_ok("↩️ Désinscription", f"{interaction.user.display_name} s'est désinscrit(e)."))
+        embed=embed_ok("✅ Inscriptions ouvertes", "Le panel a été posté dans le channel joueurs."),
+        ephemeral=True
+    )
+
+    if PLAYER_CHANNEL_ID:
+        channel = bot.get_channel(PLAYER_CHANNEL_ID)
+    else:
+        channel = interaction.channel
+
+    if channel:
+        await channel.send(embed=_build_panel_embed(), view=InscriptionView())
+
 
 
 # ════════════════════════════════════════════════════════════════════════════
